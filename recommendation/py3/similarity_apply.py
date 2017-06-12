@@ -1,47 +1,61 @@
-#!/usr/bin/python
-# coding: utf-8
-
-"""
-    Author: YuJun
-    Email: cuteuy@gmail.com
-    Date created: 2017/1/10
-"""
-from similarity import sim_distance, sim_pearson
+import collections
+import similarity as core
 
 
-# 为评论者打相似度分
-def get_top_matches(preferences, person, n=5, similarity=sim_pearson):
+# 获得某item的所有相似东西
+def get_top_matches(item_id, all_infos, n=5, similarity=core.sim_pearson):
     scores = [(
-        similarity(preferences, person, other), other
-    ) for other in preferences if other != person]
+        similarity(all_infos[item_id], all_infos[other_id]), other_id
+    ) for other_id in all_infos if other_id != item_id]
 
     scores.sort()
     scores.reverse()
-    return scores[0:n]
+    return scores[0: n]
 
 
-# 基于用户相似集，向用户推荐物品
-def get_recommendations(preferences, person, similarity=sim_pearson):
+# 基于主体相似集，向主体推荐客体
+def get_recommendations(subj_id, all_infos, n=5, similarity=core.sim_pearson):
     """
-    若person为人，则得出该人最可能喜欢的物品
-    若person为物，则得出最可能喜欢该物品的人
+    若subject为人，则得出该人最可能喜欢的物品
+    若subject为物，则得出最可能喜欢该物品的人
     """
-    totals = {}
-    sim_sums = {}
-    for other in preferences:
-        if other == person:
+    totals = collections.defaultdict(int)
+    sim_sums = collections.defaultdict(int)
+    subj_prefs = all_infos[subj_id]
+    for other, other_perfs in all_infos.items():
+        if other == subj_id:
             continue
-        sim = similarity(preferences, person, other)
-        if sim <= 0:
+        sim = similarity(subj_prefs, other_perfs)
+        if sim <= 0:  # 兴趣不相符的直接过滤掉
             continue
-        for item in preferences[other]:
-            if item not in preferences[person] or \
-                    preferences[person][item] == 0:
-                totals.setdefault(item, 0)
-                totals[item] += preferences[other][item]*sim
-                sim_sums.setdefault(item, 0)
-                sim_sums[item] += sim
-    rankings = [(total/sim_sums[item], item) for item, total in totals.items()]
+        for obj in other_perfs:
+            if obj not in subj_prefs or subj_prefs[obj] == 0:
+                totals[obj] += other_perfs[obj] * sim
+                sim_sums[obj] += sim
+    rankings = [(score/sim_sums[obj], obj) for obj, score in totals.items()]
+    rankings.sort()
+    rankings.reverse()
+    return rankings
+
+
+# 基于客体相似集，向主体推荐客体
+def get_recommend_items(pref, sim_infos, n=5, similarity=core.sim_pearson):
+    """
+    若subject为人，则得出该人最可能喜欢的物品
+    若subject为物，则得出最可能喜欢该物品的人
+    """
+    scores = collections.defaultdict(int)
+    total_sim = collections.defaultdict(int)
+
+    for (item, score) in pref.items():
+        for (similarity, item2) in sim_infos[item]:
+            if item2 in pref:
+                continue
+            scores[item2] += similarity * score
+            total_sim[item2] += similarity
+    rankings = [
+        (scores/total_sim[item], item) for item, scores in scores.items()]
+
     rankings.sort()
     rankings.reverse()
     return rankings
@@ -49,10 +63,9 @@ def get_recommendations(preferences, person, similarity=sim_pearson):
 
 # 工具：反转字典：评价者，被评价物交换
 def transform_preferences(pres):
-    result = {}
+    result = collections.defaultdict(dict)
     for person in pres:
         for item in pres[person]:
-            result.setdefault(item, {})
             result[item][person] = pres[person][item]
     return result
 
@@ -69,38 +82,10 @@ def calculate_similar_items(preferences, n=10):
         if c % 100 == 0:
             print('{} / {}'.format(c, len(item_preferences)))
         # 汇总所有
-        scores = get_top_matches(
-            item_preferences, item, n=n, similarity=sim_distance)
+        scores = get_top_matches(item, item_preferences,
+                                 n=n, similarity=core.sim_distance)
         result[item] = scores
     return result
-
-
-# 基于物品相似集，向用户推荐物品
-def get_recommend_items(preferences, matched_items, user):
-    """
-    :param preferences: 用户为key的偏好集
-    :param matched_items: 已经构建好的物品相似集
-    :param user: 要被推荐的用户
-    """
-    user_rating = preferences[user]
-    scores = {}
-    total_sim = {}
-
-    for (item, rating) in user_rating.items():
-        for (similarity, item2) in matched_items[item]:
-            if item2 in user_rating:
-                continue
-            scores.setdefault(item2, 0)
-            scores[item2] += similarity * rating
-
-            total_sim.setdefault(item2, 0)
-            total_sim[item2] += similarity
-    rankings = [
-        (scores/total_sim[item], item) for item, scores in scores.items()]
-
-    rankings.sort()
-    rankings.reverse()
-    return rankings
 
 
 if __name__ == '__main__':
@@ -141,11 +126,9 @@ if __name__ == '__main__':
             'Superman Returns': 4.0
         }
     }
-    print(get_top_matches(critics, 'Lisa Rose'))
+    print(get_top_matches('Lisa Rose', critics))
 
-    print(get_recommendations(critics, 'Toby'))
-    print(get_recommendations(critics, 'Toby', similarity=sim_distance))
+    print(get_recommendations('Toby', critics))
 
-    items = calculate_similar_items(critics)
-
-    print(get_recommend_items(critics, items, 'Toby'))
+    sim_infos = calculate_similar_items(critics)
+    print(get_recommend_items(critics['Toby'], sim_infos))
